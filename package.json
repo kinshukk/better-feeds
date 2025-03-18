@@ -1,0 +1,20 @@
+{
+  "name": "better-feeds",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bun build --watch --target browser src/content/twitter.ts --outdir=dist/content && bun build --watch --target browser src/background/index.ts --outdir=dist/background && bun build --watch --target browser src/popup/popup.ts --outdir=dist/popup",
+    "build": "bun build --target browser src/content/twitter.ts --outdir=dist/content && bun build --target browser src/background/index.ts --outdir=dist/background && bun build --target browser src/popup/popup.ts --outdir=dist/popup",
+    "postbuild": "mkdir -p dist/popup dist/icons && cp public/manifest.json dist/ && cp src/popup/popup.html dist/popup/ && cp -r public/icons/* dist/icons/ && touch dist/icons/icon16.png dist/icons/icon48.png dist/icons/icon128.png",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "dexie": "^4.0.11",
+    "natural": "^8.0.1"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.309",
+    "bun-types": "latest",
+    "typescript": "^5.8.2"
+  }
+} 

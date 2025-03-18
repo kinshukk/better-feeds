@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Better Feeds",
+  "version": "0.1.0",
+  "description": "Curate your social media feeds with personalized filtering",
+  "permissions": ["storage", "tabs", "activeTab"],
+  "host_permissions": ["https://twitter.com/*", "https://x.com/*"],
+  "background": {
+    "service_worker": "background/index.js"
+  },
+  "content_scripts": [{
+    "matches": ["https://twitter.com/*", "https://x.com/*"],
+    "js": ["content/twitter.js"]
+  }],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+} 
