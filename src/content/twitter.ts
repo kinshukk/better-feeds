@@ -1,4 +1,8 @@
 import type { TweetData, Settings, MessageType } from '../types';
+import { logger, measureTime } from '../utils/debug';
+
+// Log extension initialization
+logger.info('Twitter content script loading');
 
 // Types for our tweet data
 interface TweetInteractionState {
@@ -23,13 +27,25 @@ let settings: Settings = {
 
 // Initialize when DOM is ready
 function init() {
-  console.log('Better Feeds: Twitter content script initialized');
+  logger.info('Twitter content script initialized', { url: window.location.href });
+  
+  // Log browser and environment info for debugging
+  logger.debug('Environment info', {
+    userAgent: navigator.userAgent,
+    url: window.location.href,
+    viewport: {
+      width: window.innerWidth,
+      height: window.innerHeight
+    }
+  });
   
   // Get current settings
   chrome.runtime.sendMessage({ action: 'getSettings' } as MessageType, (response: Settings) => {
     if (response) {
       settings = response;
-      console.log('Settings loaded:', settings);
+      logger.info('Settings loaded', settings);
+    } else {
+      logger.warn('Failed to load settings, using defaults');
     }
   });
   
@@ -48,14 +64,40 @@ class TwitterDOMHandler {
   
   public startObserving(): void {
     // Twitter's main timeline element - may need adjusting as Twitter updates
-    const feedElement = document.querySelector('[aria-label="Timeline: Your Home Timeline"], [data-testid="primaryColumn"]');
+    logger.debug('Looking for Twitter timeline element');
+    
+    // Try multiple selectors to find the timeline element
+    const selectors = [
+      '[aria-label="Timeline: Your Home Timeline"]',
+      '[data-testid="primaryColumn"]',
+      'main[role="main"]',
+      '[data-testid="cellInnerDiv"]'
+    ];
+    
+    let feedElement = null;
+    for (const selector of selectors) {
+      feedElement = document.querySelector(selector);
+      if (feedElement) {
+        logger.debug(`Found timeline element using selector: ${selector}`);
+        break;
+      }
+    }
+    
     if (!feedElement) {
-      console.log('Better Feeds: Timeline element not found, retrying in 2 seconds...');
+      logger.warn('Timeline element not found, retrying in 2 seconds...', {
+        url: window.location.href,
+        selectors: selectors,
+        bodyContent: document.body.innerHTML.substring(0, 200) + '...' // Log a snippet of the body for debugging
+      });
       setTimeout(() => this.startObserving(), 2000);
       return;
     }
     
-    console.log('Better Feeds: Starting to observe timeline...');
+    logger.info('Starting to observe timeline', {
+      element: feedElement.tagName,
+      childCount: feedElement.childElementCount
+    });
+    
     this.observer.observe(feedElement, {
       childList: true,
       subtree: true,
@@ -64,58 +106,103 @@ class TwitterDOMHandler {
   }
   
   private handleMutations(mutations: MutationRecord[]): void {
-    // Find new tweets that were added to the DOM
-    mutations.forEach(mutation => {
-      if (mutation.type === 'childList' && mutation.addedNodes.length) {
-        this.processAddedNodes(mutation.addedNodes);
+    // Use performance measurement in debug mode
+    measureTime(() => {
+      // Find new tweets that were added to the DOM
+      let addedNodesCount = 0;
+      
+      mutations.forEach(mutation => {
+        if (mutation.type === 'childList' && mutation.addedNodes.length) {
+          addedNodesCount += mutation.addedNodes.length;
+          this.processAddedNodes(mutation.addedNodes);
+        }
+      });
+      
+      if (addedNodesCount > 0) {
+        logger.debug(`Processed ${addedNodesCount} added DOM nodes`);
       }
-    });
+    }, 'handleMutations');
   }
   
   private processAddedNodes(nodes: NodeList): void {
+    // Track metrics for debugging
+    let processedTweetCount = 0;
+    
     nodes.forEach(node => {
       if (node instanceof HTMLElement) {
         // Twitter tweets are usually in article elements
         const tweetElements = node.querySelectorAll('article[data-testid="tweet"]');
-        tweetElements.forEach(tweetEl => this.processTweet(tweetEl as HTMLElement));
+        
+        if (tweetElements.length > 0) {
+          logger.debug(`Found ${tweetElements.length} tweet elements in node`);
+          tweetElements.forEach(tweetEl => {
+            this.processTweet(tweetEl as HTMLElement);
+            processedTweetCount++;
+          });
+        }
         
         // Also check if the node itself is a tweet
         if (node.matches('article[data-testid="tweet"]')) {
+          logger.debug('Node itself is a tweet element');
           this.processTweet(node);
+          processedTweetCount++;
         }
       }
     });
+    
+    if (processedTweetCount > 0) {
+      logger.debug(`Processed ${processedTweetCount} tweets`);
+    }
   }
   
   private processTweet(tweetElement: HTMLElement): void {
-    // Extract tweet ID from attributes or data
-    const tweetId = this.extractTweetId(tweetElement);
-    if (!tweetId) return;
-    
-    // Skip if we've already processed this tweet
-    if (processedTweets[tweetId]) {
-      // If we've processed this tweet but still need to add buttons
-      if (!processedTweets[tweetId].hasButtons) {
-        this.injectRatingButtons(tweetElement, tweetId);
+    try {
+      // Extract tweet ID from attributes or data
+      const tweetId = this.extractTweetId(tweetElement);
+      if (!tweetId) {
+        logger.debug('Could not extract tweet ID, skipping tweet', {
+          elementHtml: tweetElement.outerHTML.substring(0, 200) + '...'
+        });
+        return;
       }
-      return;
+      
+      // Skip if we've already processed this tweet
+      if (processedTweets[tweetId]) {
+        logger.debug(`Tweet ${tweetId} already processed`);
+        
+        // If we've processed this tweet but still need to add buttons
+        if (!processedTweets[tweetId].hasButtons) {
+          logger.debug(`Tweet ${tweetId} missing buttons, injecting now`);
+          this.injectRatingButtons(tweetElement, tweetId);
+        }
+        return;
+      }
+      
+      logger.debug(`Processing new tweet: ${tweetId}`);
+      
+      // Add to processed tweets list
+      processedTweets[tweetId] = {
+        element: tweetElement,
+        hasButtons: false,
+        isHidden: false
+      };
+      
+      // Extract tweet data
+      const tweetData = this.extractTweetData(tweetElement, tweetId);
+      logger.debug('Extracted tweet data', {
+        id: tweetId,
+        username: tweetData.username,
+        contentLength: tweetData.content.length
+      });
+      
+      // Inject rating buttons
+      this.injectRatingButtons(tweetElement, tweetId);
+      
+      // Get prediction for this tweet
+      this.getPrediction(tweetId, tweetData.content);
+    } catch (error) {
+      logger.error('Error processing tweet', error);
     }
-    
-    // Add to processed tweets list
-    processedTweets[tweetId] = {
-      element: tweetElement,
-      hasButtons: false,
-      isHidden: false
-    };
-    
-    // Extract tweet data
-    const tweetData = this.extractTweetData(tweetElement, tweetId);
-    
-    // Inject rating buttons
-    this.injectRatingButtons(tweetElement, tweetId);
-    
-    // Get prediction for this tweet
-    this.getPrediction(tweetId, tweetData.content);
   }
   
   private extractTweetId(tweetElement: HTMLElement): string | null {
