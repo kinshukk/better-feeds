@@ -65,6 +65,18 @@ try {
   console.error('❌ Error copying popup.html:', error.message);
 }
 
+// Copy content CSS
+try {
+  const contentCssSrc = path.join(SRC_DIR, 'content', 'content.css');
+  const contentCssDest = path.join(DIST_DIR, 'content', 'content.css');
+  fs.copyFileSync(contentCssSrc, contentCssDest);
+  console.log('✅ Copied content.css');
+} catch (error) {
+  console.error('❌ Error copying content.css:', error.message);
+  // Decide if this should be a fatal error
+  // process.exit(1);
+}
+
 // Create placeholder icons
 console.log('📦 Generating icons...');
 try {

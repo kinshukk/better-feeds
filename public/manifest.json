@@ -10,7 +10,8 @@
   },
   "content_scripts": [{
     "matches": ["https://twitter.com/*", "https://x.com/*"],
-    "js": ["content/twitter.js"]
+    "js": ["content/twitter.js"],
+    "css": ["content/content.css"]
   }],
   "action": {
     "default_popup": "popup/popup.html",

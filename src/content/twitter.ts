@@ -51,17 +51,107 @@ function init() {
   
   // Set up observer to watch for new tweets
   observeTimeline();
+  // Animation listener is now set up within the class constructor
 }
 
-// Twitter DOM handler class
+
+// --- Twitter DOM Handler Class ---
 class TwitterDOMHandler {
   private observer: MutationObserver;
-  
+  private isListeningAnimation = false; // Flag to prevent multiple listeners
+
   constructor() {
+    logger.debug('TwitterDOMHandler constructor');
     // Configure MutationObserver to watch for new tweets
     this.observer = new MutationObserver(this.handleMutations.bind(this));
+    // Set up the animation listener once
+    this.setupAnimationListener();
   }
-  
+
+  // --- Animation Listener Logic (moved into class) ---
+  private setupAnimationListener(): void {
+    if (this.isListeningAnimation) return; // Only attach once
+
+    logger.debug('Setting up animation listener for action bar markers');
+    document.addEventListener('animationstart', (event) => {
+      // Use a specific, descriptive animation name
+      if (event.animationName === 'bf-marker-action-bar') {
+        logger.debug('Detected action bar marker animation', { target: event.target });
+        // Ensure the target is an HTMLElement before proceeding
+        if (event.target instanceof HTMLElement) {
+          this.handleActionBarMarker(event.target);
+        } else {
+           logger.warn('Animation target is not an HTMLElement', { target: event.target });
+        }
+      }
+    });
+    this.isListeningAnimation = true;
+  }
+
+  private handleActionBarMarker(anchorElement: HTMLElement): void {
+    try {
+      // Find the parent tweet article
+      const tweetElement = anchorElement.closest('article[data-testid="tweet"]');
+      if (!tweetElement) {
+        logger.warn('Could not find parent tweet element for marker', { anchor: anchorElement });
+        return;
+      }
+
+      // Ensure it's an HTMLElement before proceeding
+      if (!(tweetElement instanceof HTMLElement)) {
+          logger.warn('Parent tweet element is not an HTMLElement', { tweetElement });
+          return;
+      }
+
+      // Extract tweet ID using the class method
+      const tweetId = this.extractTweetId(tweetElement);
+      if (!tweetId) {
+        // This might happen if the anchor is found before the tweet ID link is fully rendered
+        logger.debug('Could not extract tweet ID from parent element in animation handler', { tweetElement });
+        // Optionally, retry after a short delay or rely on MutationObserver processing
+        return;
+      }
+
+      // Find the action bar container relative to the anchor
+      // Using role="group" as a starting point, might need refinement
+      const actionBar = anchorElement.closest('[role="group"]');
+      if (!actionBar || !(actionBar instanceof HTMLElement)) {
+        logger.warn('Could not find action bar container HTMLElement for marker', { anchor: anchorElement });
+        return;
+      }
+
+      // Check if buttons already exist (using a class on the container)
+      if (actionBar.querySelector('.better-feeds-rating')) {
+        // logger.debug(`Buttons already exist for tweet ${tweetId} (checked in animation handler)`);
+        // Ensure state is updated if needed (though processTweet should handle initial state)
+        if (processedTweets[tweetId] && !processedTweets[tweetId].hasButtons) {
+           processedTweets[tweetId].hasButtons = true;
+        }
+        return;
+      }
+
+      // Ensure the tweet has been initially processed by MutationObserver
+      if (!processedTweets[tweetId]) {
+        logger.debug(`Tweet ${tweetId} not yet in processed state during animation handling, deferring to MutationObserver`);
+        // It's possible the animation triggers before the MutationObserver fully processes the tweet node.
+        // Rely on processTweet to eventually call getPrediction and manage state.
+        // We only inject buttons here if the state exists.
+        return;
+      }
+
+      // If tweet state exists but buttons are missing, inject them now.
+      if (processedTweets[tweetId] && !processedTweets[tweetId].hasButtons) {
+        logger.debug(`Injecting buttons via animation trigger for tweet ${tweetId}`);
+        this.injectRatingButtons(actionBar, tweetId); // Call the modified injection method
+      }
+
+    } catch (error) {
+      logger.error('Error handling action bar marker animation', error);
+    }
+  }
+  // --- End Animation Listener Logic ---
+
+
   public startObserving(): void {
     // Twitter's main timeline element - may need adjusting as Twitter updates
     logger.debug('Looking for Twitter timeline element');
@@ -194,10 +284,10 @@ class TwitterDOMHandler {
         username: tweetData.username,
         contentLength: tweetData.content.length
       });
-      
-      // Inject rating buttons
-      this.injectRatingButtons(tweetElement, tweetId);
-      
+
+      // Inject rating buttons - This is now handled by the animation listener callback handleActionBarMarker
+      // this.injectRatingButtons(tweetElement, tweetId); // REMOVED
+
       // Get prediction for this tweet
       this.getPrediction(tweetId, tweetData.content);
     } catch (error) {
@@ -236,15 +326,21 @@ class TwitterDOMHandler {
       timestamp: Date.now()
     };
   }
-  
-  private injectRatingButtons(tweetElement: HTMLElement, tweetId: string): void {
-    // First check if we already added buttons to this tweet
-    if (tweetElement.querySelector('.better-feeds-rating')) return;
-    
-    // Find the action bar (where retweet, like buttons are)
-    const actionBar = tweetElement.querySelector('[role="group"]');
-    if (!actionBar) return;
-    
+
+  // Modified to accept the specific action bar element found by the animation handler
+  private injectRatingButtons(actionBar: HTMLElement, tweetId: string): void {
+    // Check if buttons already exist within this specific action bar
+    if (actionBar.querySelector('.better-feeds-rating')) {
+       logger.debug(`Buttons already present in action bar for tweet ${tweetId}`);
+       return;
+    }
+
+    // We already have the action bar, no need to query for it again
+    // const actionBar = tweetElement.querySelector('[role="group"]'); // REMOVED
+    // if (!actionBar) return; // REMOVED
+
+    logger.debug(`Creating and injecting buttons into action bar for tweet ${tweetId}`);
+
     // Create our custom rating buttons
     const ratingContainer = document.createElement('div');
     ratingContainer.className = 'better-feeds-rating';
