@@ -90,10 +90,30 @@ class TwitterDOMHandler {
 
   private handleActionBarMarker(anchorElement: HTMLElement): void {
     try {
-      // Find the parent tweet article
-      const tweetElement = anchorElement.closest('article[data-testid="tweet"]');
+      // Find the parent tweet article - using multiple selector strategies
+      let tweetElement: HTMLElement | null = null;
+      
+      // Strategy 1: Standard article selector
+      tweetElement = anchorElement.closest('article[data-testid="tweet"]');
+      
+      // Strategy 2: Look for article with any data-testid containing "tweet"
       if (!tweetElement) {
-        logger.warn('Could not find parent tweet element for marker', { anchor: anchorElement });
+        tweetElement = anchorElement.closest('article[data-testid*="tweet"]');
+      }
+      
+      // Strategy 3: Look for any element with a status URL nearby
+      if (!tweetElement) {
+        const permalink = anchorElement.closest('div:has(a[href*="/status/"])');
+        if (permalink instanceof HTMLElement) {
+          tweetElement = permalink;
+        }
+      }
+      
+      if (!tweetElement) {
+        logger.warn('Could not find parent tweet element for marker', {
+          anchor: anchorElement,
+          html: anchorElement.outerHTML.substring(0, 100)
+        });
         return;
       }
 
@@ -107,16 +127,46 @@ class TwitterDOMHandler {
       const tweetId = this.extractTweetId(tweetElement);
       if (!tweetId) {
         // This might happen if the anchor is found before the tweet ID link is fully rendered
-        logger.debug('Could not extract tweet ID from parent element in animation handler', { tweetElement });
-        // Optionally, retry after a short delay or rely on MutationObserver processing
+        logger.debug('Could not extract tweet ID from parent element in animation handler', {
+          tweetElement: tweetElement.outerHTML.substring(0, 100)
+        });
         return;
       }
 
-      // Find the action bar container relative to the anchor
-      // Using role="group" as a starting point, might need refinement
-      const actionBar = anchorElement.closest('[role="group"]');
+      // Find the action bar container using multiple strategies
+      let actionBar: HTMLElement | null = null;
+      
+      // Strategy 1: Role group near the anchor (primary method)
+      actionBar = anchorElement.closest('[role="group"]');
+      
+      // Strategy 2: Find any role="group" within the tweet
+      if (!actionBar && tweetElement) {
+        const actionBars = tweetElement.querySelectorAll('[role="group"]');
+        if (actionBars.length > 0) {
+          // Get the last one which is usually the action bar
+          actionBar = actionBars[actionBars.length - 1] as HTMLElement;
+        }
+      }
+      
+      // Strategy 3: Locate the element containing reply/retweet/like buttons
+      if (!actionBar) {
+        const possibleContainers = tweetElement.querySelectorAll('div');
+        for (const container of possibleContainers) {
+          if (container.childElementCount >= 3 &&
+              container.children[0] instanceof HTMLElement &&
+              container.children[0].textContent?.includes('Reply') ||
+              container.innerText.includes('Reply')) {
+            actionBar = container as HTMLElement;
+            break;
+          }
+        }
+      }
+      
       if (!actionBar || !(actionBar instanceof HTMLElement)) {
-        logger.warn('Could not find action bar container HTMLElement for marker', { anchor: anchorElement });
+        logger.warn('Could not find action bar container using multiple strategies', {
+          tweetId,
+          anchorHtml: anchorElement.outerHTML.substring(0, 100)
+        });
         return;
       }
 
@@ -132,11 +182,17 @@ class TwitterDOMHandler {
 
       // Ensure the tweet has been initially processed by MutationObserver
       if (!processedTweets[tweetId]) {
-        logger.debug(`Tweet ${tweetId} not yet in processed state during animation handling, deferring to MutationObserver`);
-        // It's possible the animation triggers before the MutationObserver fully processes the tweet node.
-        // Rely on processTweet to eventually call getPrediction and manage state.
-        // We only inject buttons here if the state exists.
-        return;
+        logger.debug(`Tweet ${tweetId} not yet in processed state during animation handling, initializing it now`);
+        // Initialize the tweet state instead of deferring
+        processedTweets[tweetId] = {
+          element: tweetElement,
+          hasButtons: false,
+          isHidden: false
+        };
+        
+        // Extract tweet data and get prediction
+        const tweetData = this.extractTweetData(tweetElement, tweetId);
+        this.getPrediction(tweetId, tweetData.content);
       }
 
       // If tweet state exists but buttons are missing, inject them now.
@@ -262,8 +318,8 @@ class TwitterDOMHandler {
         
         // If we've processed this tweet but still need to add buttons
         if (!processedTweets[tweetId].hasButtons) {
-          logger.debug(`Tweet ${tweetId} missing buttons, injecting now`);
-          this.injectRatingButtons(tweetElement, tweetId);
+          logger.debug(`Tweet ${tweetId} missing buttons, trying to inject now`);
+          this.attemptDirectButtonInjection(tweetElement, tweetId);
         }
         return;
       }
@@ -285,13 +341,65 @@ class TwitterDOMHandler {
         contentLength: tweetData.content.length
       });
 
-      // Inject rating buttons - This is now handled by the animation listener callback handleActionBarMarker
-      // this.injectRatingButtons(tweetElement, tweetId); // REMOVED
+      // Try directly injecting buttons instead of relying solely on animation
+      this.attemptDirectButtonInjection(tweetElement, tweetId);
 
       // Get prediction for this tweet
       this.getPrediction(tweetId, tweetData.content);
     } catch (error) {
       logger.error('Error processing tweet', error);
+    }
+  }
+  
+  // New helper method to attempt button injection using multiple strategies
+  private attemptDirectButtonInjection(tweetElement: HTMLElement, tweetId: string): void {
+    // Skip if buttons already exist
+    if (processedTweets[tweetId]?.hasButtons) {
+      return;
+    }
+    
+    try {
+      // Strategy 1: Find the standard action bar within the tweet
+      let actionBar = tweetElement.querySelector('[role="group"]') as HTMLElement;
+      
+      // Strategy 2: Find by container with multiple action buttons
+      if (!actionBar) {
+        const containers = tweetElement.querySelectorAll('div');
+        for (const container of containers) {
+          if (container.childElementCount >= 3 &&
+              (container.querySelectorAll('button').length >= 3 ||
+               container.querySelectorAll('svg').length >= 3)) {
+            actionBar = container as HTMLElement;
+            break;
+          }
+        }
+      }
+      
+      // Strategy 3: Look for text content related to actions
+      if (!actionBar) {
+        const elements = tweetElement.querySelectorAll('*');
+        for (const el of elements) {
+          if (el instanceof HTMLElement &&
+              (el.textContent?.includes('Reply') ||
+               el.textContent?.includes('Retweet') ||
+               el.textContent?.includes('Like'))) {
+            const parent = el.parentElement;
+            if (parent && parent.childElementCount >= 3) {
+              actionBar = parent as HTMLElement;
+              break;
+            }
+          }
+        }
+      }
+      
+      if (actionBar) {
+        logger.info(`Directly injecting buttons into tweet ${tweetId} (backup method)`);
+        this.injectRatingButtons(actionBar, tweetId);
+      } else {
+        logger.warn(`Could not find action bar for direct injection in tweet ${tweetId}`);
+      }
+    } catch (error) {
+      logger.error('Error in direct button injection', error);
     }
   }
   

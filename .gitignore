@@ -1,5 +1,4 @@
 dist/*
-CURSOR_MEMORY.md
 DESIGN_DOC.md
 DEVELOPMENT_PLAN.md
 DEVELOPMENT.md
@@ -9,4 +8,3 @@ PLAN_DOM_FIX.md
 public/icons/icon-*.png
 brainstorm.txt
 better-twitter/*
-.roorules

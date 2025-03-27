@@ -4,9 +4,14 @@
   to { outline-color: inherit; } /* Use inherit or another value that doesn't cause visual change */
 }
 
-/* Apply the animation to a potential anchor element within the tweet actions */
-/* Using [data-testid="reply"] as a starting point - may need adjustment */
-article[data-testid="tweet"] [data-testid="reply"] {
+/* Apply the animation to potential anchor elements within the tweet actions */
+/* Multiple selectors for redundancy - Twitter changes their DOM frequently */
+article[data-testid="tweet"] [data-testid="reply"],
+article[data-testid="tweet"] [role="group"] > *:first-child,
+article[data-testid="tweet"] [role="group"] button:first-of-type,
+article[data-testid="tweet"] [aria-label*="Reply" i],
+article[data-testid="tweet"] [role="group"] svg:first-of-type,
+article[data-testid="tweet"] [role="group"] path[d^="M4.75 3.79l4"] {
   /* Apply a very short, non-disruptive animation */
   animation: bf-marker-action-bar 0.01s 1;
 }
