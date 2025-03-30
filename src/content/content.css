@@ -9,9 +9,13 @@
 article[data-testid="tweet"] [data-testid="reply"],
 article[data-testid="tweet"] [role="group"] > *:first-child,
 article[data-testid="tweet"] [role="group"] button:first-of-type,
-article[data-testid="tweet"] [aria-label*="Reply" i],
-article[data-testid="tweet"] [role="group"] svg:first-of-type,
-article[data-testid="tweet"] [role="group"] path[d^="M4.75 3.79l4"] {
+article[data-testid*="tweet"] [aria-label*="Reply" i],
+article[data-testid*="tweet"] [role="group"] svg:first-of-type,
+article:has(a[href*="/status/"]) [role="group"],
+article [aria-label*="Reply" i],
+article [aria-label*="repost" i],
+article [aria-label*="Like" i],
+article a[href*="/status/"] + div button:first-of-type {
   /* Apply a very short, non-disruptive animation */
   animation: bf-marker-action-bar 0.01s 1;
 }
@@ -36,6 +40,7 @@ article[data-testid="tweet"] [role="group"] path[d^="M4.75 3.79l4"] {
 
 .better-feeds-rating button:hover {
   opacity: 1;
+  transform: scale(1.1);
 }
 
 .better-feeds-sentiment {

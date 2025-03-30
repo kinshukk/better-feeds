@@ -68,7 +68,7 @@ class TwitterDOMHandler {
     this.setupAnimationListener();
   }
 
-  // --- Animation Listener Logic (moved into class) ---
+  // --- Animation Listener Logic ---
   private setupAnimationListener(): void {
     if (this.isListeningAnimation) return; // Only attach once
 
@@ -103,10 +103,12 @@ class TwitterDOMHandler {
       
       // Strategy 3: Look for any element with a status URL nearby
       if (!tweetElement) {
-        const permalink = anchorElement.closest('div:has(a[href*="/status/"])');
-        if (permalink instanceof HTMLElement) {
-          tweetElement = permalink;
-        }
+        tweetElement = anchorElement.closest('article:has(a[href*="/status/"])');
+      }
+      
+      // Strategy 4: Just any article
+      if (!tweetElement) {
+        tweetElement = anchorElement.closest('article');
       }
       
       if (!tweetElement) {
@@ -152,13 +154,64 @@ class TwitterDOMHandler {
       if (!actionBar) {
         const possibleContainers = tweetElement.querySelectorAll('div');
         for (const container of possibleContainers) {
-          if (container.childElementCount >= 3 &&
-              container.children[0] instanceof HTMLElement &&
-              container.children[0].textContent?.includes('Reply') ||
-              container.innerText.includes('Reply')) {
-            actionBar = container as HTMLElement;
-            break;
+          if (container instanceof HTMLElement) {
+            // Look for containers with multiple buttons or action button text
+            if ((container.querySelectorAll('button').length >= 3) ||
+                (container.textContent && 
+                 (container.textContent.includes('Reply') || 
+                  container.textContent.includes('Repost') || 
+                  container.textContent.includes('Like')))) {
+              actionBar = container;
+              break;
+            }
           }
+        }
+      }
+      
+      // Strategy 4: Find by parent of interaction buttons
+      if (!actionBar) {
+        const replyButton = tweetElement.querySelector('button[aria-label*="Reply" i], button[aria-label*="reply" i]');
+        const likeButton = tweetElement.querySelector('button[aria-label*="Like" i], button[aria-label*="like" i]');
+        
+        if (replyButton instanceof HTMLElement) {
+          // Walk up to find a parent containing multiple buttons
+          let parent = replyButton.parentElement;
+          let level = 0;
+          
+          // Try up to 3 parent levels
+          while (parent && level < 3) {
+            if (parent.querySelectorAll('button').length >= 3) {
+              actionBar = parent;
+              break;
+            }
+            parent = parent.parentElement;
+            level++;
+          }
+        } else if (likeButton instanceof HTMLElement) {
+          // Try the same with like button if reply isn't found
+          let parent = likeButton.parentElement;
+          let level = 0;
+          
+          while (parent && level < 3) {
+            if (parent.querySelectorAll('button').length >= 3) {
+              actionBar = parent;
+              break;
+            }
+            parent = parent.parentElement;
+            level++;
+          }
+        }
+      }
+      
+      // Strategy 5: Look for timestamp parent
+      if (!actionBar) {
+        const timestamp = tweetElement.querySelector('a[href*="/status/"]');
+        if (timestamp && timestamp.parentElement) {
+          const timestampParent = timestamp.parentElement;
+          
+          // Try injecting after timestamp
+          this.injectRatingButtons(timestampParent, tweetId);
+          return;
         }
       }
       
@@ -205,7 +258,6 @@ class TwitterDOMHandler {
       logger.error('Error handling action bar marker animation', error);
     }
   }
-  // --- End Animation Listener Logic ---
 
 
   public startObserving(): void {
@@ -217,7 +269,9 @@ class TwitterDOMHandler {
       '[aria-label="Timeline: Your Home Timeline"]',
       '[data-testid="primaryColumn"]',
       'main[role="main"]',
-      '[data-testid="cellInnerDiv"]'
+      '[data-testid="cellInnerDiv"]',
+      'div[role="region"]',
+      'section[role="region"]'
     ];
     
     let feedElement = null;
@@ -277,7 +331,8 @@ class TwitterDOMHandler {
     nodes.forEach(node => {
       if (node instanceof HTMLElement) {
         // Twitter tweets are usually in article elements
-        const tweetElements = node.querySelectorAll('article[data-testid="tweet"]');
+        // Use a more flexible selector to find tweets
+        const tweetElements = node.querySelectorAll('article');
         
         if (tweetElements.length > 0) {
           logger.debug(`Found ${tweetElements.length} tweet elements in node`);
@@ -288,7 +343,7 @@ class TwitterDOMHandler {
         }
         
         // Also check if the node itself is a tweet
-        if (node.matches('article[data-testid="tweet"]')) {
+        if (node.tagName === 'ARTICLE') {
           logger.debug('Node itself is a tweet element');
           this.processTweet(node);
           processedTweetCount++;
@@ -366,10 +421,11 @@ class TwitterDOMHandler {
       if (!actionBar) {
         const containers = tweetElement.querySelectorAll('div');
         for (const container of containers) {
-          if (container.childElementCount >= 3 &&
+          if (container instanceof HTMLElement &&
+              container.childElementCount >= 3 &&
               (container.querySelectorAll('button').length >= 3 ||
                container.querySelectorAll('svg').length >= 3)) {
-            actionBar = container as HTMLElement;
+            actionBar = container;
             break;
           }
         }
@@ -381,13 +437,47 @@ class TwitterDOMHandler {
         for (const el of elements) {
           if (el instanceof HTMLElement &&
               (el.textContent?.includes('Reply') ||
-               el.textContent?.includes('Retweet') ||
+               el.textContent?.includes('Repost') ||
                el.textContent?.includes('Like'))) {
             const parent = el.parentElement;
             if (parent && parent.childElementCount >= 3) {
               actionBar = parent as HTMLElement;
               break;
             }
+          }
+        }
+      }
+      
+      // Strategy 4: Find by action buttons directly
+      if (!actionBar) {
+        const replyButton = tweetElement.querySelector('button[aria-label*="Reply" i], button[aria-label*="reply" i]');
+        if (replyButton instanceof HTMLElement) {
+          // Walk up max 3 levels to find container with multiple buttons
+          let parent = replyButton.parentElement;
+          let level = 0;
+          
+          while (parent && level < 3) {
+            if (parent.querySelectorAll('button').length >= 3) {
+              actionBar = parent;
+              break;
+            }
+            parent = parent.parentElement;
+            level++;
+          }
+        }
+      }
+      
+      // Strategy 5: Try to inject next to timestamp as last resort
+      if (!actionBar) {
+        const timestamp = tweetElement.querySelector('a[href*="/status/"]');
+        if (timestamp && timestamp.parentElement) {
+          const timestampParent = timestamp.parentElement as HTMLElement;
+          
+          // Check if timestamp parent already has our buttons
+          if (!timestampParent.querySelector('.better-feeds-rating')) {
+            logger.info(`Injecting buttons next to timestamp for tweet ${tweetId} (fallback method)`);
+            this.injectRatingButtons(timestampParent, tweetId, true); // true = timestamp mode
+            return;
           }
         }
       }
@@ -404,28 +494,80 @@ class TwitterDOMHandler {
   }
   
   private extractTweetId(tweetElement: HTMLElement): string | null {
-    // Twitter embeds tweet IDs in various ways, often in links
+    // Strategy 1: Twitter embeds tweet IDs in permalink links
     const permalinkElement = tweetElement.querySelector('a[href*="/status/"]');
-    if (!permalinkElement) return null;
+    if (permalinkElement) {
+      const href = permalinkElement.getAttribute('href');
+      if (href) {
+        const match = href.match(/\/status\/(\d+)/);
+        return match ? match[1] : null;
+      }
+    }
     
-    const href = permalinkElement.getAttribute('href');
-    if (!href) return null;
+    // Strategy 2: Look for data-tweet-id attribute
+    const tweetId = tweetElement.getAttribute('data-tweet-id');
+    if (tweetId) return tweetId;
     
-    // Extract ID from permalink URL
-    const match = href.match(/\/status\/(\d+)/);
-    return match ? match[1] : null;
+    // Strategy 3: Look for data-item-id attribute
+    const itemId = tweetElement.getAttribute('data-item-id');
+    if (itemId) return itemId;
+    
+    // Strategy 4: Look for any attribute containing "tweet" and "id"
+    for (const attr of tweetElement.attributes) {
+      if (attr.name.includes('tweet') && attr.name.includes('id')) {
+        return attr.value;
+      }
+    }
+    
+    return null;
   }
   
   private extractTweetData(tweetElement: HTMLElement, tweetId: string): TweetData {
-    // Find username element 
-    const usernameElement = tweetElement.querySelector('[data-testid="User-Name"]');
-    const username = usernameElement ? 
-      usernameElement.textContent?.trim().replace('@', '') || 'unknown' : 
-      'unknown';
+    // Find username element - try multiple selectors 
+    const usernameSelectors = [
+      '[data-testid="User-Name"]',
+      'a[href*="/status/"]', // Often contains username in parent
+      'a[role="link"][tabindex="-1"]' // Typical for user links
+    ];
     
-    // Find tweet text
-    const contentElement = tweetElement.querySelector('[data-testid="tweetText"]');
-    const content = contentElement ? contentElement.textContent?.trim() || '' : '';
+    let username = 'unknown';
+    for (const selector of usernameSelectors) {
+      const element = tweetElement.querySelector(selector);
+      if (element) {
+        username = element.textContent?.trim().replace('@', '') || 'unknown';
+        // If we found something that looks like a username, break
+        if (username !== 'unknown' && username.length > 0) break;
+      }
+    }
+    
+    // Find tweet text - try multiple selectors
+    const contentSelectors = [
+      '[data-testid="tweetText"]',
+      'div[lang]', // Tweet text often has lang attribute
+      'article > div > div > div > div' // Typical nesting pattern for tweet content
+    ];
+    
+    let content = '';
+    for (const selector of contentSelectors) {
+      const element = tweetElement.querySelector(selector);
+      if (element) {
+        content = element.textContent?.trim() || '';
+        // If we found non-empty content, break
+        if (content.length > 0) break;
+      }
+    }
+    
+    // Fallback: gather text from all direct div children
+    if (content === '') {
+      const allDivs = tweetElement.querySelectorAll('div');
+      for (const div of allDivs) {
+        const text = div.textContent?.trim() || '';
+        if (text.length > 20) { // Likely tweet content if it's substantial
+          content = text;
+          break;
+        }
+      }
+    }
     
     return {
       id: tweetId,
@@ -436,29 +578,43 @@ class TwitterDOMHandler {
   }
 
   // Modified to accept the specific action bar element found by the animation handler
-  private injectRatingButtons(actionBar: HTMLElement, tweetId: string): void {
+  // Added timestampMode parameter for alternate injection style
+  private injectRatingButtons(actionBar: HTMLElement, tweetId: string, timestampMode: boolean = false): void {
     // Check if buttons already exist within this specific action bar
     if (actionBar.querySelector('.better-feeds-rating')) {
        logger.debug(`Buttons already present in action bar for tweet ${tweetId}`);
+       
+       // Mark as having buttons
+       if (processedTweets[tweetId]) {
+         processedTweets[tweetId].hasButtons = true;
+       }
        return;
     }
 
-    // We already have the action bar, no need to query for it again
-    // const actionBar = tweetElement.querySelector('[role="group"]'); // REMOVED
-    // if (!actionBar) return; // REMOVED
-
-    logger.debug(`Creating and injecting buttons into action bar for tweet ${tweetId}`);
+    logger.debug(`Creating and injecting buttons into ${timestampMode ? 'timestamp area' : 'action bar'} for tweet ${tweetId}`);
 
     // Create our custom rating buttons
     const ratingContainer = document.createElement('div');
     ratingContainer.className = 'better-feeds-rating';
-    ratingContainer.style.display = 'inline-flex';
-    ratingContainer.style.alignItems = 'center';
-    ratingContainer.style.marginLeft = '12px';
+    
+    // Different styling based on injection mode
+    if (timestampMode) {
+      // Timestamp mode - more compact horizontal layout for header row
+      ratingContainer.style.display = 'inline-flex';
+      ratingContainer.style.alignItems = 'center';
+      ratingContainer.style.marginLeft = '8px';
+      ratingContainer.style.verticalAlign = 'middle';
+    } else {
+      // Standard action bar mode
+      ratingContainer.style.display = 'inline-flex';
+      ratingContainer.style.alignItems = 'center';
+      ratingContainer.style.marginLeft = '12px';
+    }
     
     // Add sentiment label if available
     if (processedTweets[tweetId]?.sentiment) {
       const sentimentLabel = document.createElement('span');
+      sentimentLabel.className = 'better-feeds-sentiment';
       sentimentLabel.textContent = processedTweets[tweetId].sentiment || '';
       sentimentLabel.style.fontSize = '13px';
       sentimentLabel.style.marginRight = '8px';
@@ -491,15 +647,18 @@ class TwitterDOMHandler {
     button.style.fontSize = '16px';
     button.style.padding = '8px';
     button.style.opacity = '0.6';
-    button.style.transition = 'opacity 0.2s';
+    button.style.transition = 'opacity 0.2s, transform 0.2s';
+    button.style.lineHeight = '1'; // Prevent extra spacing
     
     // Hover effect
     button.addEventListener('mouseover', () => {
       button.style.opacity = '1';
+      button.style.transform = 'scale(1.1)';
     });
     
     button.addEventListener('mouseout', () => {
       button.style.opacity = '0.6';
+      button.style.transform = 'scale(1)';
     });
     
     // Click handler to save rating
@@ -642,4 +801,4 @@ chrome.runtime.onMessage.addListener((message: MessageType) => {
   if (message.action === 'updateSettings') {
     settings = { ...settings, ...message.settings };
   }
-}); 
+});

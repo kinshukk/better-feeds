@@ -8,3 +8,4 @@ PLAN_DOM_FIX.md
 public/icons/icon-*.png
 brainstorm.txt
 better-twitter/*
+node_modules/*
