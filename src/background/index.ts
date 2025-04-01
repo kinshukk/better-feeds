@@ -1,4 +1,4 @@
-import { db } from '../utils/db';
+import { getDbInstance } from '../utils/db'; // Import the instance getter
 import { TweetClassifier } from '../utils/classifier';
 import { logger } from '../utils/debug';
 import type { MessageType, TweetData } from '../types';
@@ -8,6 +8,7 @@ logger.info('Background script initializing');
 
 // Initialize classifier
 const classifier = new TweetClassifier();
+const db = getDbInstance(); // Get the singleton DB instance
 
 // Handle messages from content scripts
 chrome.runtime.onMessage.addListener((message: any, sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {

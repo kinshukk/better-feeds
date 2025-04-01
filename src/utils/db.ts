@@ -2,7 +2,8 @@ import Dexie from 'dexie';
 import type { TweetData, Settings } from '../types';
 
 // Define our database schema using Dexie
-class BetterFeedsDatabase extends Dexie {
+// Export the class directly
+export class BetterFeedsDatabase extends Dexie {
   tweets!: Dexie.Table<TweetData, string>; // string = type of the primary key
   settings!: Dexie.Table<Settings, string>;
 
@@ -58,5 +59,16 @@ class BetterFeedsDatabase extends Dexie {
   }
 }
 
-// Create and export a single instance of the database
-export const db = new BetterFeedsDatabase(); 
+// Singleton pattern for the main application instance
+let dbInstance: BetterFeedsDatabase | null = null;
+
+export function getDbInstance(): BetterFeedsDatabase {
+  if (!dbInstance) {
+    console.log("Creating DB instance..."); // Added log for debugging
+    dbInstance = new BetterFeedsDatabase();
+  }
+  return dbInstance;
+}
+
+// Note: Other parts of the application will need to be updated
+// to use getDbInstance() instead of the direct 'db' import.
